@@ -5,7 +5,7 @@ import os
 import json
 import clr
 import psutil
-from random import randint
+
 
 script_dir = os.path.dirname(os.path.abspath(__file__))
 dll_path = os.path.join(script_dir, "SeliwareAPI.dll")
@@ -23,33 +23,52 @@ rbx_pids = []
 os.makedirs(saved_tabs_dir, exist_ok=True)
 os.makedirs(scripts_dir, exist_ok=True)
 
-class ExecutorApp:
-    def __init__(self, root):
-        self.root = root
+
+def attach_process():
+    global rbx_pids
+    found = [proc.pid for proc in psutil.process_iter(['name']) if proc.info['name'] == "RobloxPlayerBeta.exe"]
+    for pidor in found:
+        if pidor not in rbx_pids:
+            rbx_pids.append(pidor)
+            Seliware.Inject(pidor)
+    rbx_pids = [pid for pid in rbx_pids if psutil.pid_exists(pid)]
+
+
+class PyRO:
+    def __init__(self):
+        self.script_list = None
+        self.selected_script = None
+        self.popup_menu = None
+        self.editor_tabview = None
+        self.root = ctk.CTk()
         self.root.title("PyRO ui")
         self.root.geometry("800x600")
 
         ctk.set_appearance_mode("dark")
         ctk.set_default_color_theme("blue")
 
-        self.tabview = ctk.CTkTabview(root)
+        self.tabview = ctk.CTkTabview(self.root)
         self.tabview.pack(pady=10, padx=10, fill="both", expand=True)
 
         self.tabview.add("Main")
         self.tabview.add("Scripts")
         self.tabview.add("Options")
 
+        self.top_most_var = tk.BooleanVar(value=False)
+
         self.editor_tabs = {}
-        
+
         self.init_main_tab()
         self.init_scripts_tab()
+        self.init_settings_tab()
         self.load_tabs()
+        self.root.mainloop()
 
     def init_main_tab(self):
         tab = self.tabview.tab("Main")
         self.editor_tabview = ctk.CTkTabview(tab)
         self.editor_tabview.pack(padx=10, pady=10, fill="both", expand=True)
-        
+
         self.setup_menu()
 
         btn_frame = ctk.CTkFrame(tab)
@@ -57,7 +76,7 @@ class ExecutorApp:
 
         ctk.CTkButton(btn_frame, text="Execute", command=self.run_code, width=100).pack(side="left", padx=5)
         ctk.CTkButton(btn_frame, text="Clear", command=self.clear_content, width=100).pack(side="left", padx=5)
-        ctk.CTkButton(btn_frame, text="Attach", command=self.attach_process, width=100, fg_color="#FF4500", hover_color="#FF6347").pack(side="left", padx=5)
+        ctk.CTkButton(btn_frame, text="Attach", command=attach_process, width=100, fg_color="#FF4500", hover_color="#FF6347").pack(side="left", padx=5)
         ctk.CTkButton(btn_frame, text="New tab", command=self.add_tab, width=100).pack(side="left", padx=5)
 
     def init_scripts_tab(self):
@@ -68,6 +87,14 @@ class ExecutorApp:
 
         ctk.CTkButton(tab, text="Refresh", command=self.update_scripts).pack(pady=5)
         self.update_scripts()
+
+    def init_settings_tab(self):
+        tab = self.tabview.tab("Options")
+        top_most_switch = ctk.CTkSwitch(master=tab,text="Top Most Toggle",variable=self.top_most_var,command=self.toggle_top_most)
+        top_most_switch.pack(padx=5, pady=5)
+
+    def toggle_top_most(self):
+        self.root.attributes('-topmost', self.top_most_var.get())
 
     def setup_menu(self):
         self.popup_menu = tk.Menu(self.root, tearoff=0)
@@ -110,16 +137,16 @@ class ExecutorApp:
     def open_in_editor(self):
         name = self.selected_script
         path = os.path.join(scripts_dir, name)
-        
+
         for tab_name, tab_data in self.editor_tabs.items():
             if tab_data.get("path") == path:
                 self.editor_tabview.set(tab_name)
                 return
-        
+
         try:
             with open(path, "r", encoding="utf-8") as f:
                 data = f.read()
-            
+
             tab_name = f"Script: {name}"
             self.create_tab(tab_name, data, path)
         except Exception as e:
@@ -127,18 +154,18 @@ class ExecutorApp:
 
     def create_tab(self, name, content="", path=None):
         new_tab = self.editor_tabview.add(name)
-        
+
         text_box = ctk.CTkTextbox(new_tab)
         text_box.pack(fill="both", expand=True, padx=5, pady=5)
         text_box.insert("1.0", content)
         text_box.bind("<Button-3>", lambda e: self.popup_menu.tk_popup(e.x_root, e.y_root))
-        
+
         self.editor_tabs[name] = {
             "textbox": text_box,
             "path": path,
             "saved": True if path else False
         }
-        
+
         self.editor_tabview.set(name)
         self.save_tabs()
 
@@ -167,15 +194,6 @@ class ExecutorApp:
         tab = self.get_current_tab()
         if tab:
             tab["textbox"].delete("1.0", "end")
-
-    def attach_process(self):
-        global rbx_pids
-        found = [proc.pid for proc in psutil.process_iter(['name']) if proc.info['name'] == "RobloxPlayerBeta.exe"]
-        for pidor in found:
-            if pidor not in rbx_pids:
-                rbx_pids.append(pidor)
-                Seliware.Inject(pidor)
-        rbx_pids = [pid for pid in rbx_pids if psutil.pid_exists(pid)]
 
     def copy_content(self):
         tab = self.get_current_tab()
@@ -242,10 +260,13 @@ class ExecutorApp:
                         f"Save changes in '{name}'?"
                     )
                     if answer is None:
+                        self.editor_tabview.delete(name)
+                        self.editor_tabs.pop(name)
                         return
                     elif answer:
-                        self.store_tab(name)
-            
+                        self.store_tab()
+                        return
+
             self.editor_tabview.delete(name)
             self.editor_tabs.pop(name)
             self.save_tabs()
@@ -259,10 +280,10 @@ class ExecutorApp:
         tab = self.editor_tabs.get(name)
         if not tab:
             return
-        
+
         content = tab["textbox"].get("1.0", "end-1c")
         path = tab.get("path")
-        
+
         if not path:
             path = filedialog.asksaveasfilename(
                 initialdir=scripts_dir,
@@ -271,20 +292,20 @@ class ExecutorApp:
             )
             if not path:
                 return
-        
+
         try:
             with open(path, "w", encoding="utf-8") as f:
                 f.write(content)
-            
+
             tab["path"] = path
             tab["saved"] = True
-            
+
             new_name = f"Script: {os.path.basename(path)}"
             if new_name != name:
                 self.editor_tabview.delete(name)
                 self.editor_tabs.pop(name)
                 self.create_tab(new_name, content, path)
-            
+
             messagebox.showinfo("Success", "Saved")
             self.update_scripts()
             self.save_tabs()
@@ -297,18 +318,18 @@ class ExecutorApp:
         dialog.geometry("300x150")
         dialog.transient(self.root)
         dialog.grab_set()
-        
+
         result = tk.StringVar(value=current)
-        
+
         ctk.CTkLabel(dialog, text="New name:").pack(pady=5)
         entry = ctk.CTkEntry(dialog, textvariable=result)
         entry.pack(pady=5, padx=10, fill="x")
-        
+
         def submit():
             dialog.destroy()
-        
+
         ctk.CTkButton(dialog, text="OK", command=submit).pack(pady=5)
-        
+
         dialog.wait_window()
         return result.get()
 
@@ -321,7 +342,7 @@ class ExecutorApp:
                 "content": data["textbox"].get("1.0", "end-1c"),
                 "saved": data["saved"]
             })
-        
+
         try:
             with open(tabs_file, "w", encoding="utf-8") as f:
                 json.dump(tabs, f, indent=2)
@@ -333,18 +354,17 @@ class ExecutorApp:
             try:
                 with open(tabs_file, "r", encoding="utf-8") as f:
                     tabs = json.load(f)
-                
+
                 for tab in tabs:
                     content = tab.get("content", "")
                     path = tab.get("path")
                     name = tab.get("name", f"Tab {len(self.editor_tabs) + 1}")
-                    
+
                     self.create_tab(name, content, path)
                     self.editor_tabs[name]["saved"] = tab.get("saved", True)
             except Exception as e:
                 print("Load error:", e)
 
+
 if __name__ == "__main__":
-    root = ctk.CTk()
-    app = ExecutorApp(root)
-    root.mainloop()
+    app = PyRO()
