@@ -5,7 +5,61 @@ import os
 import json
 import clr
 import psutil
+from pypresence import Presence
+import time
+from threading import Thread
 
+class DiscordRPC:
+    def __init__(self):
+        self.rpc = None
+        self.client_id = "1364911632773545984"
+        self.running = False
+        self.current_tab = "Main"
+        self.current_editor_tab = ""
+        self.time = int(time.time())
+
+    def start(self):
+        try:
+            self.rpc = Presence(self.client_id)
+            self.rpc.connect()
+            self.running = True
+            Thread(target=self.update_presence, daemon=True).start()
+        except Exception as e:
+            print(f"Discord RPC error: {e}")
+
+    def update_presence(self):
+        while self.running:
+            try:
+                details = ""
+                if self.current_tab == "Main":
+                    details = f"Looking into main tab -> {self.current_editor_tab[:15]}..." if self.current_editor_tab else "Editing scripts..."
+                elif self.current_tab == "Scripts":
+                    details = "Browses through the saved scripts..."
+                elif self.current_tab == "Options":
+                    details = "Tweaking settings..."
+
+                self.rpc.update(
+                    state="v0.3 | Selected api: Seliware",
+                    details=details,
+                    large_image="icon",
+                    large_text="PyRO",
+                    start=self.time,
+                    buttons=[{"label": "GitHub", "url": "https://github.com/iwonderwhoisg1itch/PyRO"}, {"label": "Discord", "url": "https://discord.gg/UWtjQayY9q"}]
+                )
+            except Exception as e:
+                print(f"RPC update error: {e}")
+            time.sleep(3)
+
+    def set_tab(self, tab_name):
+        self.current_tab = tab_name
+
+    def set_editor_tab(self, tab_name):
+        self.current_editor_tab = tab_name
+
+    def close(self):
+        self.running = False
+        if self.rpc:
+            self.rpc.close()
 
 script_dir = os.path.dirname(os.path.abspath(__file__))
 dll_path = os.path.join(script_dir, "SeliwareAPI.dll")
@@ -44,15 +98,22 @@ class PyRO:
         self.root.title("PyRO ui")
         self.root.geometry("800x600")
 
+        self.rpc = DiscordRPC()
+        self.rpc.start()
+
         ctk.set_appearance_mode("dark")
         ctk.set_default_color_theme("blue")
 
         self.tabview = ctk.CTkTabview(self.root)
         self.tabview.pack(pady=10, padx=10, fill="both", expand=True)
 
+        self.tabview.configure(command=lambda: self.on_tab_change())
+
         self.tabview.add("Main")
         self.tabview.add("Scripts")
         self.tabview.add("Options")
+
+        self.tabview.configure(command=self.on_tab_change)
 
         self.top_most_var = tk.BooleanVar(value=False)
 
@@ -62,12 +123,34 @@ class PyRO:
         self.init_scripts_tab()
         self.init_settings_tab()
         self.load_tabs()
+
+
+        self.root.protocol("WM_DELETE_WINDOW", self.on_close)
         self.root.mainloop()
+
+    def on_tab_change(self):
+        current_tab = self.tabview.get()
+        self.rpc.set_tab(current_tab)
+
+        if current_tab == "Main" and self.editor_tabview:
+            current_editor_tab = self.editor_tabview.get()
+            self.rpc.set_editor_tab(current_editor_tab if current_editor_tab else "")
+
+    def on_editor_tab_change(self):
+        if self.tabview.get() == "Main":
+            current_editor_tab = self.editor_tabview.get()
+            self.rpc.set_editor_tab(current_editor_tab if current_editor_tab else "")
+
+    def on_close(self):
+        self.rpc.close()
+        self.root.destroy()
 
     def init_main_tab(self):
         tab = self.tabview.tab("Main")
         self.editor_tabview = ctk.CTkTabview(tab)
         self.editor_tabview.pack(padx=10, pady=10, fill="both", expand=True)
+
+        self.editor_tabview.configure(command=lambda: self.on_editor_tab_change())
 
         self.setup_menu()
 
@@ -167,6 +250,7 @@ class PyRO:
         }
 
         self.editor_tabview.set(name)
+        self.rpc.set_editor_tab(name)
         self.save_tabs()
 
     def add_tab(self):
@@ -238,15 +322,18 @@ class PyRO:
             new_name = self.get_new_name(current)
             if new_name and new_name != current:
                 tab_data = self.editor_tabs.pop(current)
-                self.editor_tabs[new_name] = tab_data
+                content = tab_data["textbox"].get("1.0", "end-1c")
                 self.editor_tabview.delete(current)
-                self.editor_tabview.add(new_name)
-                self.editor_tabview.set(new_name)
+                self.create_tab(new_name, content, tab_data["path"])
+                self.editor_tabs[new_name]["saved"] = tab_data["saved"]
+                self.rpc.set_editor_tab(new_name)
                 self.save_tabs()
 
     def remove_tab(self):
         current = self.editor_tabview.get()
         if current:
+            new_current = self.editor_tabview.get()
+            self.rpc.set_editor_tab(new_current if new_current else "")
             self.close_tab(current)
 
     def close_tab(self, name):
@@ -269,6 +356,8 @@ class PyRO:
 
             self.editor_tabview.delete(name)
             self.editor_tabs.pop(name)
+            new_current = self.editor_tabview.get()
+            self.rpc.set_editor_tab(new_current if new_current else "")
             self.save_tabs()
 
     def store_tab(self):
