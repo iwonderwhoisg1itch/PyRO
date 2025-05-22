@@ -8,6 +8,10 @@ import psutil
 from pypresence import Presence
 import time
 from threading import Thread
+from pygments.lexers.scripting import LuaLexer
+from chlorophyll import CodeView
+
+
 
 class DiscordRPC:
     def __init__(self):
@@ -39,7 +43,7 @@ class DiscordRPC:
                     details = "Tweaking settings..."
 
                 self.rpc.update(
-                    state="v0.3 | Selected api: Seliware",
+                    state=f"v{ver} | Selected api: Seliware | ver: {Seliware.GetVersion()}",
                     details=details,
                     large_image="icon",
                     large_text="PyRO",
@@ -70,6 +74,8 @@ tabs_file = os.path.join(script_dir, "open_tabs.json")
 clr.AddReference(dll_path)
 from SeliwareAPI import Seliware
 
+ver = str("0.4")
+
 Seliware.Initialize()
 
 rbx_pids = []
@@ -77,6 +83,36 @@ rbx_pids = []
 os.makedirs(saved_tabs_dir, exist_ok=True)
 os.makedirs(scripts_dir, exist_ok=True)
 
+class EditorSettings:
+    def __init__(self):
+        self.settings_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), "settings.json")
+        self.default_settings = {
+            "font": "Fira Code",
+            "font_size": 10
+        }
+        self.current_settings = self.default_settings.copy()
+        self.load_settings()
+
+    def load_settings(self):
+        if os.path.exists(self.settings_file):
+            try:
+                with open(self.settings_file, "r", encoding="utf-8") as f:
+                    loaded = json.load(f)
+                    self.current_settings.update(loaded)
+            except Exception as e:
+                print(f"Error loading settings: {e}")
+
+    def save_settings(self):
+        try:
+            with open(self.settings_file, "w", encoding="utf-8") as f:
+                json.dump(self.current_settings, f, indent=2)
+        except Exception as e:
+            print(f"Error saving settings: {e}")
+
+    def apply_settings(self, editor):
+        editor.configure(
+            font=(self.current_settings["font"], self.current_settings["font_size"])
+        )
 
 def attach_process():
     global rbx_pids
@@ -90,15 +126,18 @@ def attach_process():
 
 class PyRO:
     def __init__(self):
+        self.font_var = None
+        self.font_size_var = None
         self.script_list = None
         self.selected_script = None
         self.popup_menu = None
         self.editor_tabview = None
         self.root = ctk.CTk()
-        self.root.title("PyRO ui")
-        self.root.geometry("800x600")
+        self.root.title(f"PyRO v{ver} | Selected api: Seliware | ver: {Seliware.GetVersion()}")
+        self.root.geometry("900x600")
 
         self.rpc = DiscordRPC()
+        self.settings = EditorSettings()
         self.rpc.start()
 
         ctk.set_appearance_mode("dark")
@@ -124,9 +163,9 @@ class PyRO:
         self.init_settings_tab()
         self.load_tabs()
 
-
         self.root.protocol("WM_DELETE_WINDOW", self.on_close)
         self.root.mainloop()
+        self.root.update_idletasks()
 
     def on_tab_change(self):
         current_tab = self.tabview.get()
@@ -147,19 +186,29 @@ class PyRO:
 
     def init_main_tab(self):
         tab = self.tabview.tab("Main")
-        self.editor_tabview = ctk.CTkTabview(tab)
-        self.editor_tabview.pack(padx=10, pady=10, fill="both", expand=True)
 
+        main_container = ctk.CTkFrame(tab)
+        main_container.pack(fill="both", expand=True, padx=10, pady=10)
+
+        main_container.grid_rowconfigure(0, weight=1)
+        main_container.grid_rowconfigure(1, weight=0)
+        main_container.grid_columnconfigure(0, weight=1)
+
+        self.editor_tabview = ctk.CTkTabview(main_container)
+        self.editor_tabview.grid(row=0, column=0, sticky="nsew", pady=(0, 5))
         self.editor_tabview.configure(command=lambda: self.on_editor_tab_change())
-
         self.setup_menu()
 
-        btn_frame = ctk.CTkFrame(tab)
-        btn_frame.pack(pady=5)
+        btn_frame = ctk.CTkFrame(main_container, bg_color="#2b2b2b", fg_color="#2b2b2b")
+        btn_frame.grid(row=1, column=0, sticky="ew")
+
+        btn_frame = ctk.CTkFrame(btn_frame, fg_color="transparent")
+        btn_frame.pack(anchor="center", pady=5)
 
         ctk.CTkButton(btn_frame, text="Execute", command=self.run_code, width=100).pack(side="left", padx=5)
         ctk.CTkButton(btn_frame, text="Clear", command=self.clear_content, width=100).pack(side="left", padx=5)
-        ctk.CTkButton(btn_frame, text="Attach", command=attach_process, width=100, fg_color="#FF4500", hover_color="#FF6347").pack(side="left", padx=5)
+        ctk.CTkButton(btn_frame, text="Attach", command=attach_process, width=100, fg_color="#FF4500",
+                      hover_color="#FF6347").pack(side="left", padx=5)
         ctk.CTkButton(btn_frame, text="New tab", command=self.add_tab, width=100).pack(side="left", padx=5)
 
     def init_scripts_tab(self):
@@ -173,8 +222,53 @@ class PyRO:
 
     def init_settings_tab(self):
         tab = self.tabview.tab("Options")
-        top_most_switch = ctk.CTkSwitch(master=tab,text="Top Most Toggle",variable=self.top_most_var,command=self.toggle_top_most)
-        top_most_switch.pack(padx=5, pady=5)
+
+        editor_frame = ctk.CTkFrame(tab)
+        editor_frame.pack(fill="x", padx=10, pady=10)
+
+        ctk.CTkLabel(editor_frame, text="Editor Settings", font=("Arial", 14, "bold")).pack(anchor="w", pady=(0, 10))
+
+        font_frame = ctk.CTkFrame(editor_frame)
+        font_frame.pack(fill="x", pady=5)
+
+        ctk.CTkLabel(font_frame, text="Font:").pack(side="left", padx=5)
+        self.font_var = tk.StringVar(value=self.settings.current_settings["font"])
+        font_entry = ctk.CTkEntry(font_frame, textvariable=self.font_var)
+        font_entry.pack(side="left", padx=5, fill="x", expand=True)
+
+        ctk.CTkLabel(font_frame, text="Size:").pack(side="left", padx=5)
+        self.font_size_var = tk.IntVar(value=self.settings.current_settings["font_size"])
+        font_size_spin = ctk.CTkEntry(font_frame, textvariable=self.font_size_var, width=50)
+        font_size_spin.pack(side="left", padx=5)
+
+        btn_frame = ctk.CTkFrame(editor_frame)
+        btn_frame.pack(fill="x", pady=10)
+
+        ctk.CTkButton(btn_frame, text="Apply", command=self.apply_editor_settings).pack(side="left", padx=5)
+        ctk.CTkButton(btn_frame, text="Save", command=self.save_editor_settings).pack(side="left", padx=5)
+
+        top_most_frame = ctk.CTkFrame(tab)
+        top_most_frame.pack(fill="x", padx=10, pady=10)
+        top_most_switch = ctk.CTkSwitch(top_most_frame, text="Top Most Toggle", variable=self.top_most_var,
+                                        command=self.toggle_top_most)
+        top_most_switch.pack(anchor="w")
+
+    def save_editor_settings(self):
+        self.apply_editor_settings()
+        self.settings.save_settings()
+        messagebox.showinfo("Success", "Settings saved")
+
+    def apply_editor_settings(self):
+        self.settings.current_settings.update({
+            "font": self.font_var.get(),
+            "font_size": self.font_size_var.get()
+        })
+
+        for tab_data in self.editor_tabs.values():
+            self.settings.apply_settings(tab_data["textbox"])
+
+        messagebox.showinfo("Success", "Font settings applied to current tabs")
+
 
     def toggle_top_most(self):
         self.root.attributes('-topmost', self.top_most_var.get())
@@ -238,7 +332,13 @@ class PyRO:
     def create_tab(self, name, content="", path=None):
         new_tab = self.editor_tabview.add(name)
 
-        text_box = ctk.CTkTextbox(new_tab)
+        text_box = CodeView(
+            new_tab,
+            lexer=LuaLexer,
+            font=(self.settings.current_settings["font"], self.settings.current_settings["font_size"]),
+            color_scheme="dracula",
+            autohide_scrollbar=True
+        )
         text_box.pack(fill="both", expand=True, padx=5, pady=5)
         text_box.insert("1.0", content)
         text_box.bind("<Button-3>", lambda e: self.popup_menu.tk_popup(e.x_root, e.y_root))
@@ -451,6 +551,7 @@ class PyRO:
 
                     self.create_tab(name, content, path)
                     self.editor_tabs[name]["saved"] = tab.get("saved", True)
+
             except Exception as e:
                 print("Load error:", e)
 
