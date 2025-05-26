@@ -1,17 +1,12 @@
-import customtkinter as ctk
-import tkinter as tk
-from tkinter import filedialog, messagebox
+import flet as ft
 import os
 import json
 import clr
 import psutil
-from pypresence import Presence
 import time
+import sys
+from pypresence import Presence
 from threading import Thread
-from pygments.lexers.scripting import LuaLexer
-from chlorophyll import CodeView
-
-
 
 class DiscordRPC:
     def __init__(self):
@@ -36,19 +31,22 @@ class DiscordRPC:
             try:
                 details = ""
                 if self.current_tab == "Main":
-                    details = f"Looking into main tab -> {self.current_editor_tab[:15]}..." if self.current_editor_tab else "Editing scripts..."
+                    details = f"Editing: {self.current_editor_tab[:15]}..." if self.current_editor_tab else "Editing scripts..."
                 elif self.current_tab == "Scripts":
-                    details = "Browses through the saved scripts..."
+                    details = "Browsing scripts..."
                 elif self.current_tab == "Options":
-                    details = "Tweaking settings..."
+                    details = "Adjusting settings..."
 
                 self.rpc.update(
-                    state=f"v{ver} | Selected api: Seliware | ver: {Seliware.GetVersion()}",
+                    state=f"v{ver} | Seliware v{seliver}",
                     details=details,
                     large_image="icon",
                     large_text="PyRO",
                     start=self.time,
-                    buttons=[{"label": "GitHub", "url": "https://github.com/iwonderwhoisg1itch/PyRO"}, {"label": "Discord", "url": "https://discord.gg/UWtjQayY9q"}]
+                    buttons=[
+                        {"label": "GitHub", "url": "https://github.com/iwonderwhoisg1itch/PyRO"},
+                        {"label": "Discord", "url": "https://discord.gg/UWtjQayY9q"}
+                    ]
                 )
             except Exception as e:
                 print(f"RPC update error: {e}")
@@ -65,54 +63,40 @@ class DiscordRPC:
         if self.rpc:
             self.rpc.close()
 
-script_dir = os.path.dirname(os.path.abspath(__file__))
-dll_path = os.path.join(script_dir, "SeliwareAPI.dll")
-scripts_dir = os.path.join(script_dir, "scripts")
-saved_tabs_dir = os.path.join(script_dir, "saved_tabs")
-tabs_file = os.path.join(script_dir, "open_tabs.json")
+def get_base_path():
+    if getattr(sys, 'frozen', False):
+        return os.path.dirname(sys.executable)
+    else:
+        return os.path.dirname(os.path.abspath(__file__))
+
+base_dir = get_base_path()
+bin_dir = os.path.dirname(os.path.abspath(__file__))
+dll_path = os.path.join(bin_dir, "SeliwareAPI.dll")
+scripts_dir = os.path.join(base_dir, "scripts")
+saved_tabs_dir = os.path.join(base_dir, "saved_tabs")
+tabs_file = os.path.join(base_dir, "open_tabs.json")
 
 clr.AddReference(dll_path)
 from SeliwareAPI import Seliware
 
-ver = str("0.4")
-
 Seliware.Initialize()
+
+def getSeliVer():
+    ver = Seliware.GetVersion()
+    if "-" in ver:
+        seliver = ver.split("-", 1)[-1]
+    else:
+        seliver = ver
+    return seliver 
+
+ver = "0.5"
+seliver = getSeliVer()
 
 rbx_pids = []
 
 os.makedirs(saved_tabs_dir, exist_ok=True)
 os.makedirs(scripts_dir, exist_ok=True)
 
-class EditorSettings:
-    def __init__(self):
-        self.settings_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), "settings.json")
-        self.default_settings = {
-            "font": "Fira Code",
-            "font_size": 10
-        }
-        self.current_settings = self.default_settings.copy()
-        self.load_settings()
-
-    def load_settings(self):
-        if os.path.exists(self.settings_file):
-            try:
-                with open(self.settings_file, "r", encoding="utf-8") as f:
-                    loaded = json.load(f)
-                    self.current_settings.update(loaded)
-            except Exception as e:
-                print(f"Error loading settings: {e}")
-
-    def save_settings(self):
-        try:
-            with open(self.settings_file, "w", encoding="utf-8") as f:
-                json.dump(self.current_settings, f, indent=2)
-        except Exception as e:
-            print(f"Error saving settings: {e}")
-
-    def apply_settings(self, editor):
-        editor.configure(
-            font=(self.current_settings["font"], self.current_settings["font_size"])
-        )
 
 def attach_process():
     global rbx_pids
@@ -123,438 +107,539 @@ def attach_process():
             Seliware.Inject(pidor)
     rbx_pids = [pid for pid in rbx_pids if psutil.pid_exists(pid)]
 
-
 class PyRO:
-    def __init__(self):
-        self.font_var = None
-        self.font_size_var = None
-        self.script_list = None
-        self.selected_script = None
-        self.popup_menu = None
-        self.editor_tabview = None
-        self.root = ctk.CTk()
-        self.root.title(f"PyRO v{ver} | Selected api: Seliware | ver: {Seliware.GetVersion()}")
-        self.root.geometry("900x600")
-
+    def __init__(self, page: ft.Page):
+        self.page = page
+        self.setup_window()
         self.rpc = DiscordRPC()
-        self.settings = EditorSettings()
-        self.rpc.start()
-
-        ctk.set_appearance_mode("dark")
-        ctk.set_default_color_theme("blue")
-
-        self.tabview = ctk.CTkTabview(self.root)
-        self.tabview.pack(pady=10, padx=10, fill="both", expand=True)
-
-        self.tabview.configure(command=lambda: self.on_tab_change())
-
-        self.tabview.add("Main")
-        self.tabview.add("Scripts")
-        self.tabview.add("Options")
-
-        self.tabview.configure(command=self.on_tab_change)
-
-        self.top_most_var = tk.BooleanVar(value=False)
-
-        self.editor_tabs = {}
-
-        self.init_main_tab()
-        self.init_scripts_tab()
-        self.init_settings_tab()
+        
+        self.tabs = {}
+        self.current_tab_index = 0
+        self.current_main_tab = "Main"
+        self.selected_script = None
+        
+        self.setup_ui()
+        self.file_picker = ft.FilePicker(on_result=self.on_file_selected)
+        self.save_picker = ft.FilePicker(on_result=self.on_save_selected)
+        self.page.overlay.extend([self.file_picker, self.save_picker])
         self.load_tabs()
-
-        self.root.protocol("WM_DELETE_WINDOW", self.on_close)
-        self.root.mainloop()
-        self.root.update_idletasks()
-
-    def on_tab_change(self):
-        current_tab = self.tabview.get()
-        self.rpc.set_tab(current_tab)
-
-        if current_tab == "Main" and self.editor_tabview:
-            current_editor_tab = self.editor_tabview.get()
-            self.rpc.set_editor_tab(current_editor_tab if current_editor_tab else "")
-
-    def on_editor_tab_change(self):
-        if self.tabview.get() == "Main":
-            current_editor_tab = self.editor_tabview.get()
-            self.rpc.set_editor_tab(current_editor_tab if current_editor_tab else "")
-
-    def on_close(self):
-        self.rpc.close()
-        self.root.destroy()
-
-    def init_main_tab(self):
-        tab = self.tabview.tab("Main")
-
-        main_container = ctk.CTkFrame(tab)
-        main_container.pack(fill="both", expand=True, padx=10, pady=10)
-
-        main_container.grid_rowconfigure(0, weight=1)
-        main_container.grid_rowconfigure(1, weight=0)
-        main_container.grid_columnconfigure(0, weight=1)
-
-        self.editor_tabview = ctk.CTkTabview(main_container)
-        self.editor_tabview.grid(row=0, column=0, sticky="nsew", pady=(0, 5))
-        self.editor_tabview.configure(command=lambda: self.on_editor_tab_change())
-        self.setup_menu()
-
-        btn_frame = ctk.CTkFrame(main_container, bg_color="#2b2b2b", fg_color="#2b2b2b")
-        btn_frame.grid(row=1, column=0, sticky="ew")
-
-        btn_frame = ctk.CTkFrame(btn_frame, fg_color="transparent")
-        btn_frame.pack(anchor="center", pady=5)
-
-        ctk.CTkButton(btn_frame, text="Execute", command=self.run_code, width=100).pack(side="left", padx=5)
-        ctk.CTkButton(btn_frame, text="Clear", command=self.clear_content, width=100).pack(side="left", padx=5)
-        ctk.CTkButton(btn_frame, text="Attach", command=attach_process, width=100, fg_color="#FF4500",
-                      hover_color="#FF6347").pack(side="left", padx=5)
-        ctk.CTkButton(btn_frame, text="New tab", command=self.add_tab, width=100).pack(side="left", padx=5)
-
-    def init_scripts_tab(self):
-        tab = self.tabview.tab("Scripts")
-        self.script_list = tk.Listbox(tab, bg="#1a1a1a", fg="white", selectbackground="#3a3a3a", height=15)
-        self.script_list.pack(padx=10, pady=(10, 5), fill="both", expand=True)
-        self.script_list.bind("<Button-3>", self.show_script_menu)
-
-        ctk.CTkButton(tab, text="Refresh", command=self.update_scripts).pack(pady=5)
-        self.update_scripts()
-
-    def init_settings_tab(self):
-        tab = self.tabview.tab("Options")
-
-        editor_frame = ctk.CTkFrame(tab)
-        editor_frame.pack(fill="x", padx=10, pady=10)
-
-        ctk.CTkLabel(editor_frame, text="Editor Settings", font=("Arial", 14, "bold")).pack(anchor="w", pady=(0, 10))
-
-        font_frame = ctk.CTkFrame(editor_frame)
-        font_frame.pack(fill="x", pady=5)
-
-        ctk.CTkLabel(font_frame, text="Font:").pack(side="left", padx=5)
-        self.font_var = tk.StringVar(value=self.settings.current_settings["font"])
-        font_entry = ctk.CTkEntry(font_frame, textvariable=self.font_var)
-        font_entry.pack(side="left", padx=5, fill="x", expand=True)
-
-        ctk.CTkLabel(font_frame, text="Size:").pack(side="left", padx=5)
-        self.font_size_var = tk.IntVar(value=self.settings.current_settings["font_size"])
-        font_size_spin = ctk.CTkEntry(font_frame, textvariable=self.font_size_var, width=50)
-        font_size_spin.pack(side="left", padx=5)
-
-        btn_frame = ctk.CTkFrame(editor_frame)
-        btn_frame.pack(fill="x", pady=10)
-
-        ctk.CTkButton(btn_frame, text="Apply", command=self.apply_editor_settings).pack(side="left", padx=5)
-        ctk.CTkButton(btn_frame, text="Save", command=self.save_editor_settings).pack(side="left", padx=5)
-
-        top_most_frame = ctk.CTkFrame(tab)
-        top_most_frame.pack(fill="x", padx=10, pady=10)
-        top_most_switch = ctk.CTkSwitch(top_most_frame, text="Top Most Toggle", variable=self.top_most_var,
-                                        command=self.toggle_top_most)
-        top_most_switch.pack(anchor="w")
-
-    def save_editor_settings(self):
-        self.apply_editor_settings()
-        self.settings.save_settings()
-        messagebox.showinfo("Success", "Settings saved")
-
-    def apply_editor_settings(self):
-        self.settings.current_settings.update({
-            "font": self.font_var.get(),
-            "font_size": self.font_size_var.get()
-        })
-
-        for tab_data in self.editor_tabs.values():
-            self.settings.apply_settings(tab_data["textbox"])
-
-        messagebox.showinfo("Success", "Font settings applied to current tabs")
-
-
-    def toggle_top_most(self):
-        self.root.attributes('-topmost', self.top_most_var.get())
-
-    def setup_menu(self):
-        self.popup_menu = tk.Menu(self.root, tearoff=0)
-        self.popup_menu.add_command(label="Copy", command=self.copy_content)
-        self.popup_menu.add_command(label="Paste", command=self.paste_content)
-        self.popup_menu.add_command(label="Cut", command=self.cut_content)
-        self.popup_menu.add_separator()
-        self.popup_menu.add_command(label="Select all", command=self.select_all_content)
-        self.popup_menu.add_separator()
-        self.popup_menu.add_command(label="Rename", command=self.change_tab_name)
-        self.popup_menu.add_command(label="Close", command=self.remove_tab)
-        self.popup_menu.add_command(label="Save", command=self.store_tab)
-
-    def show_script_menu(self, event):
-        sel = self.script_list.curselection()
-        if sel:
-            self.selected_script = self.script_list.get(sel[0])
-            menu = tk.Menu(self.root, tearoff=0)
-            menu.add_command(label="Execute", command=self.exec_selected)
-            menu.add_command(label="Load in editor", command=self.open_in_editor)
-            menu.add_command(label="Delete", command=self.remove_script)
-            menu.tk_popup(event.x_root, event.y_root)
-
-    def remove_script(self):
-        if hasattr(self, 'selected_script'):
-            path = os.path.join(scripts_dir, self.selected_script)
-            try:
-                os.remove(path)
-                self.update_scripts()
-                messagebox.showinfo("Done", "Script removed")
-            except Exception as e:
-                messagebox.showerror("Error", f"Failed: {str(e)}")
-
-    def update_scripts(self):
-        self.script_list.delete(0, tk.END)
-        for f in os.listdir(scripts_dir):
-            if f.endswith((".lua", ".txt")):
-                self.script_list.insert(tk.END, f)
-
-    def open_in_editor(self):
-        name = self.selected_script
-        path = os.path.join(scripts_dir, name)
-
-        for tab_name, tab_data in self.editor_tabs.items():
-            if tab_data.get("path") == path:
-                self.editor_tabview.set(tab_name)
-                return
-
-        try:
-            with open(path, "r", encoding="utf-8") as f:
-                data = f.read()
-
-            tab_name = f"Script: {name}"
-            self.create_tab(tab_name, data, path)
-        except Exception as e:
-            messagebox.showerror("Error", f"Failed: {str(e)}")
-
-    def create_tab(self, name, content="", path=None):
-        new_tab = self.editor_tabview.add(name)
-
-        text_box = CodeView(
-            new_tab,
-            lexer=LuaLexer,
-            font=(self.settings.current_settings["font"], self.settings.current_settings["font_size"]),
-            color_scheme="dracula",
-            autohide_scrollbar=True
+        
+        if not self.tabs:
+            self.add_tab()
+        
+        self.page.on_window_event = self.on_window_event
+        self.rpc.start()
+    
+    def setup_window(self):
+        self.page.title = f"PyRO v{ver}"
+        self.page.window_width = 1000
+        self.page.window_height = 700
+        self.page.theme_mode = ft.ThemeMode.DARK
+        self.page.window_prevent_close = True
+    
+    def setup_ui(self):
+        self.setup_navigation()
+        self.setup_main_tab()
+        self.setup_scripts_tab()
+        
+        self.content_area = ft.Column(expand=True)
+        self.page.add(self.content_area)
+        self.show_tab_content("Main")
+    
+    def setup_navigation(self):
+        self.nav_drawer = ft.NavigationDrawer(
+            controls=[
+                ft.NavigationDrawerDestination(label="Main", icon=ft.Icons.CODE),
+                ft.NavigationDrawerDestination(label="Scripts", icon=ft.Icons.LIST),
+                ft.NavigationDrawerDestination(label="Options", icon=ft.Icons.SETTINGS),
+            ],
+            on_change=self.on_nav_change
         )
-        text_box.pack(fill="both", expand=True, padx=5, pady=5)
-        text_box.insert("1.0", content)
-        text_box.bind("<Button-3>", lambda e: self.popup_menu.tk_popup(e.x_root, e.y_root))
+        self.page.drawer = self.nav_drawer
+        
+        self.app_bar = ft.AppBar(
+            title=ft.Text(f"PyRO v{ver} for Seliware v{seliver}"),
+            leading=ft.IconButton(
+                icon=ft.Icons.MENU,
+                on_click=lambda e: self.toggle_nav_drawer()
+            ),
+        )
+        self.page.appbar = self.app_bar
+    
+    def setup_main_tab(self):
+        self.tab_headers = ft.Row(scroll=True, expand=True, height=40)
+        self.tab_contents = ft.Column(expand=True)
 
-        self.editor_tabs[name] = {
-            "textbox": text_box,
+        self.main_tab_content = ft.Column(
+            controls=[
+                ft.Row([
+                    self.tab_headers,
+                    ft.IconButton(ft.Icons.ADD, on_click=lambda _: self.add_tab())
+                ]),
+                ft.Divider(),
+
+                self.tab_contents,
+
+                ft.Row(
+                    controls=[
+                        ft.Row(
+                            controls=[
+                                ft.ElevatedButton(
+                                    content=ft.Row([
+                                        ft.Icon(ft.Icons.PLAY_ARROW, color=ft.Colors.WHITE, size=20),
+                                        ft.Text("Execute", color=ft.Colors.WHITE)
+                                    ]),
+                                    on_click=self.execute_script,
+                                    style=ft.ButtonStyle(
+                                        bgcolor=ft.Colors.BLUE_800,
+                                        padding=ft.padding.symmetric(horizontal=15, vertical=15),
+                                        shape=ft.RoundedRectangleBorder(radius=5)
+                                    )
+                                ),
+                                
+                                ft.OutlinedButton(
+                                    content=ft.Row([
+                                        ft.Icon(ft.Icons.CLEAR, color=ft.Colors.BLUE_300, size=20),
+                                        ft.Text("Clear", color=ft.Colors.BLUE_300)
+                                    ]),
+                                    on_click=self.clear_script,
+                                    style=ft.ButtonStyle(
+                                        side=ft.BorderSide(1, ft.Colors.BLUE_800),
+                                        padding=ft.padding.symmetric(horizontal=15, vertical=15),
+                                        shape=ft.RoundedRectangleBorder(radius=5)
+                                    )
+                                ),
+                                
+                                ft.OutlinedButton(
+                                    content=ft.Row([
+                                        ft.Icon(ft.Icons.FILE_OPEN, color=ft.Colors.BLUE_300, size=20),
+                                        ft.Text("Open File", color=ft.Colors.BLUE_300)
+                                    ]),
+                                    on_click=self.open_file_dialog,
+                                    style=ft.ButtonStyle(
+                                        side=ft.BorderSide(1, ft.Colors.BLUE_800),
+                                        padding=ft.padding.symmetric(horizontal=15, vertical=15),
+                                        shape=ft.RoundedRectangleBorder(radius=5)
+                                    )
+                                ),
+                                
+                                ft.OutlinedButton(
+                                    content=ft.Row([
+                                        ft.Icon(ft.Icons.SAVE, color=ft.Colors.BLUE_300, size=20),
+                                        ft.Text("Save File", color=ft.Colors.BLUE_300)
+                                    ]),
+                                    on_click=self.save_current_file,
+                                    style=ft.ButtonStyle(
+                                        side=ft.BorderSide(1, ft.Colors.BLUE_800),
+                                        padding=ft.padding.symmetric(horizontal=15, vertical=15),
+                                        shape=ft.RoundedRectangleBorder(radius=5)
+                                    )
+                                ),
+                            ],
+                            spacing=10,
+                            expand=True
+                        ),
+
+                        ft.ElevatedButton(
+                            content=ft.Row([
+                                ft.Icon(ft.Icons.LINK, color=ft.Colors.WHITE, size=20),
+                                ft.Text("Attach", color=ft.Colors.WHITE)
+                            ]),
+                            on_click=lambda _: attach_process(),
+                            style=ft.ButtonStyle(
+                                bgcolor=ft.Colors.BLUE_800,
+                                padding=ft.padding.symmetric(horizontal=15, vertical=15),
+                                shape=ft.RoundedRectangleBorder(radius=5)
+                            )
+                        ),
+                    ],
+                    alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
+                    spacing=20,
+                    vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                )
+            ],
+            expand=True,
+            spacing=10
+        )
+    
+    def setup_scripts_tab(self):
+        self.script_list = ft.ListView(expand=True)
+        self.scripts_tab_content = ft.Column(
+            controls=[
+                self.script_list,
+                ft.ElevatedButton("Refresh", on_click=self.update_scripts)
+            ],
+            expand=True
+        )
+        self.update_scripts()
+    
+    def add_tab(self, name=None, content="", path=None):
+        if name is None:
+            tab_num = len(self.tabs) + 1
+            name = f"Tab {tab_num}"
+            while name in self.tabs:
+                tab_num += 1
+                name = f"Tab {tab_num}"
+
+        text_field = ft.TextField(
+            value=content,
+            multiline=True,
+            hint_text="Script goes here...",
+            expand=True,
+            border=ft.InputBorder.NONE,
+            on_change=lambda e: self.save_tabs()
+        )
+
+        tab_text = ft.Text(name)
+        tab_name_input = ft.TextField(
+            value=name,
+            visible=False,
+            height=30,
+            content_padding=ft.padding.symmetric(horizontal=10, vertical=5),
+            on_submit=lambda e, old_name=name: self.rename_tab(old_name, e.control.value)
+        )
+
+        tab_click_area = ft.GestureDetector(
+            content=ft.Container(content=tab_text),
+            on_tap=lambda e, tab_name=name: self.switch_to_tab(tab_name),
+            on_double_tap=lambda e, tf=tab_name_input, t=tab_text: self.toggle_rename(tf, t)
+        )
+
+        close_btn = ft.IconButton(
+            icon=ft.Icons.CLOSE,
+            icon_size=14,
+            data=name,
+            on_click=self.close_tab_click
+        )
+
+        tab_header = ft.Container(
+            content=ft.Row([tab_click_area, tab_name_input, close_btn]),
+            padding=ft.padding.symmetric(horizontal=10, vertical=5),
+            height=40,
+            border_radius=5,
+            data=name,
+            bgcolor=ft.Colors.TRANSPARENT
+        )
+
+        content_container = ft.Container(
+            content=text_field,
+            expand=True,
+            visible=False
+        )
+
+        self.tabs[name] = {
+            "header": tab_header,
+            "content": content_container,
+            "text_field": text_field,
+            "text": tab_text,
+            "input": tab_name_input,
             "path": path,
-            "saved": True if path else False
+            "saved": path is not None
         }
 
-        self.editor_tabview.set(name)
+        self.update_tabs_ui()
+        self.switch_to_tab(name)
         self.rpc.set_editor_tab(name)
         self.save_tabs()
 
-    def add_tab(self):
-        name = f"Tab {len(self.editor_tabs) + 1}"
-        self.create_tab(name)
-
-    def exec_selected(self):
-        path = os.path.join(scripts_dir, self.selected_script)
-        try:
-            with open(path, "r", encoding="utf-8") as f:
-                Seliware.Execute(f.read())
-        except Exception as e:
-            messagebox.showerror("Error", f"Failed: {str(e)}")
-
-    def get_current_tab(self):
-        current = self.editor_tabview.get()
-        return self.editor_tabs.get(current)
-
-    def run_code(self):
-        tab = self.get_current_tab()
-        if tab:
-            Seliware.Execute(tab["textbox"].get("1.0", "end-1c"))
-
-    def clear_content(self):
-        tab = self.get_current_tab()
-        if tab:
-            tab["textbox"].delete("1.0", "end")
-
-    def copy_content(self):
-        tab = self.get_current_tab()
-        if tab:
-            self.root.clipboard_clear()
-            try:
-                text = tab["textbox"].get("sel.first", "sel.last")
-                self.root.clipboard_append(text)
-            except tk.TclError:
-                pass
-        return "break"
-
-    def paste_content(self):
-        tab = self.get_current_tab()
-        if tab:
-            try:
-                text = self.root.clipboard_get()
-                tab["textbox"].insert("insert", text)
-            except tk.TclError:
-                pass
-        return "break"
-
-    def cut_content(self):
-        self.copy_content()
-        tab = self.get_current_tab()
-        if tab:
-            try:
-                tab["textbox"].delete("sel.first", "sel.last")
-            except tk.TclError:
-                pass
-        return "break"
-
-    def select_all_content(self):
-        tab = self.get_current_tab()
-        if tab:
-            tab["textbox"].tag_add("sel", "1.0", "end")
-        return "break"
-
-    def change_tab_name(self):
-        current = self.editor_tabview.get()
-        if current:
-            new_name = self.get_new_name(current)
-            if new_name and new_name != current:
-                tab_data = self.editor_tabs.pop(current)
-                content = tab_data["textbox"].get("1.0", "end-1c")
-                self.editor_tabview.delete(current)
-                self.create_tab(new_name, content, tab_data["path"])
-                self.editor_tabs[new_name]["saved"] = tab_data["saved"]
-                self.rpc.set_editor_tab(new_name)
-                self.save_tabs()
-
-    def remove_tab(self):
-        current = self.editor_tabview.get()
-        if current:
-            new_current = self.editor_tabview.get()
-            self.rpc.set_editor_tab(new_current if new_current else "")
-            self.close_tab(current)
-
-    def close_tab(self, name):
-        if name in self.editor_tabs:
-            tab = self.editor_tabs[name]
-            if not tab["saved"]:
-                content = tab["textbox"].get("1.0", "end-1c")
-                if content.strip():
-                    answer = messagebox.askyesnocancel(
-                        "Save?",
-                        f"Save changes in '{name}'?"
-                    )
-                    if answer is None:
-                        self.editor_tabview.delete(name)
-                        self.editor_tabs.pop(name)
-                        return
-                    elif answer:
-                        self.store_tab()
-                        return
-
-            self.editor_tabview.delete(name)
-            self.editor_tabs.pop(name)
-            new_current = self.editor_tabview.get()
-            self.rpc.set_editor_tab(new_current if new_current else "")
-            self.save_tabs()
-
-    def store_tab(self):
-        current = self.editor_tabview.get()
-        if current:
-            self.save_tab(current)
-
-    def save_tab(self, name):
-        tab = self.editor_tabs.get(name)
+    
+    def update_tabs_ui(self):
+        self.tab_headers.controls = [tab["header"] for tab in self.tabs.values()]
+        self.tab_contents.controls = [tab["content"] for tab in self.tabs.values()]
+        
+        for i, tab in enumerate(self.tabs.values()):
+            tab["content"].visible = (i == self.current_tab_index)
+            tab["header"].bgcolor = (
+                ft.Colors.BLUE_800 if i == self.current_tab_index
+                else ft.Colors.TRANSPARENT
+            )
+        
+        self.page.update()
+    
+    def switch_to_tab(self, tab_name):
+        for i, name in enumerate(self.tabs.keys()):
+            if name == tab_name:
+                self.current_tab_index = i
+                break
+        
+        self.update_tabs_ui()
+        self.rpc.set_editor_tab(tab_name)
+    
+    def close_tab_click(self, e):
+        self.close_tab(e.control.data)
+    
+    def close_tab(self, tab_name):
+        tab = self.tabs.get(tab_name)
         if not tab:
             return
 
-        content = tab["textbox"].get("1.0", "end-1c")
-        path = tab.get("path")
+        if not tab["saved"] and tab["text_field"].value.strip():
+            def handle_dialog(result):
+                self.page.dialog.open = False
+                self.page.update()
+                if result:
+                    self._remove_tab(tab_name)
 
-        if not path:
-            path = filedialog.asksaveasfilename(
-                initialdir=scripts_dir,
-                defaultextension=".lua",
-                filetypes=[("Lua Files", "*.lua"), ("Text Files", "*.txt"), ("All Files", "*.*")]
+            confirm_dialog = ft.AlertDialog(
+                modal=True,
+                title=ft.Text("Unsaved Changes"),
+                content=ft.Text(f"Tab '{tab_name}' has unsaved changes. Close anyway?"),
+                actions=[
+                    ft.TextButton("Yes", on_click=lambda e: handle_dialog(True)),
+                    ft.TextButton("No", on_click=lambda e: handle_dialog(False)),
+                ],
+                on_dismiss=lambda e: handle_dialog(False)
             )
-            if not path:
-                return
 
+            self.page.dialog = confirm_dialog
+            if confirm_dialog not in self.page.controls:
+                self.page.controls.append(confirm_dialog)
+            confirm_dialog.open = True
+            self.page.update()
+        else:
+            self._remove_tab(tab_name)
+
+    def open_file_dialog(self, e=None):
+        self.file_picker.pick_files(
+            allow_multiple=False,
+            file_type=ft.FilePickerFileType.CUSTOM,
+            allowed_extensions=["lua", "txt"]
+        )
+
+    def on_file_selected(self, e: ft.FilePickerResultEvent):
+        if e.files:
+            file_path = e.files[0].path
+            try:
+                with open(file_path, "r", encoding="utf-8") as f:
+                    content = f.read()
+                script_name = os.path.basename(file_path)
+                self.add_tab(f"Script: {script_name}", content, file_path)
+            except Exception as ex:
+                self.show_message(f"Open error: {ex}")
+
+    def toggle_rename(self, text_field, text_display):
+        text_field.visible = True
+        text_display.visible = False
+        self.page.update()
+
+    def rename_tab(self, old_name, new_name):
+        if not new_name or new_name in self.tabs:
+            return
+        tab = self.tabs.pop(old_name)
+        tab["text"].value = new_name
+        tab["input"].value = new_name
+        tab["text"].visible = True
+        tab["input"].visible = False
+        tab["header"].data = new_name
+        tab["header"].content.controls[-1].data = new_name
+        self.tabs[new_name] = tab
+        self.update_tabs_ui()
+        self.rpc.set_editor_tab(new_name)
+        self.save_tabs()
+
+
+    def _remove_tab(self, tab_name):
+        if tab_name not in self.tabs:
+            return
+        
+        tab_index = list(self.tabs.keys()).index(tab_name)
+        del self.tabs[tab_name]
+        
+        if self.current_tab_index >= tab_index:
+            self.current_tab_index = max(0, self.current_tab_index - 1)
+        
+        if not self.tabs:
+            self.add_tab()
+        else:
+            self.update_tabs_ui()
+        
+        self.save_tabs()
+    
+    def show_tab_content(self, tab_name):
+        self.content_area.controls.clear()
+        if tab_name == "Main":
+            self.content_area.controls.append(self.main_tab_content)
+        elif tab_name == "Scripts":
+            self.content_area.controls.append(self.scripts_tab_content)
+        elif tab_name == "Options":
+            self.content_area.controls.append(self.options_tab_content)
+        
+        self.current_main_tab = tab_name
+        self.rpc.set_tab(tab_name)
+        self.page.update()
+    
+    def execute_script(self, e):
+        if not self.tabs:
+            return
+        
+        current_tab = list(self.tabs.values())[self.current_tab_index]
+        script = current_tab["text_field"].value
+        if script.strip():
+            try:
+                Seliware.Execute(script)
+            except Exception as e:
+                self.show_message(f"Execution error: {str(e)}")
+    
+    def clear_script(self, e):
+        if not self.tabs:
+            return
+        
+        current_tab = list(self.tabs.values())[self.current_tab_index]
+        current_tab["text_field"].value = ""
+        current_tab["saved"] = False
+        self.page.update()
+    
+    def update_scripts(self, e=None):
+        self.script_list.controls.clear()
+        for f in os.listdir(scripts_dir):
+            if f.endswith((".lua", ".txt")):
+                self.script_list.controls.append(
+                    ft.ListTile(
+                        leading=ft.PopupMenuButton(
+                            icon=ft.Icons.MORE_VERT,
+                            items=[
+                                ft.PopupMenuItem(text="Execute", on_click=lambda e, fn=f: self.exec_selected(fn)),
+                                ft.PopupMenuItem(text="Open", on_click=lambda e, fn=f: self.open_in_editor(fn)),
+                                ft.PopupMenuItem(text="Delete", on_click=lambda e, fn=f: self.remove_script(fn)),
+                            ],
+                        ),
+                        title=ft.Text(f),
+                    )
+                )
+        self.page.update()
+    
+    def save_current_file(self, e=None):
+        current_tab = list(self.tabs.values())[self.current_tab_index]
+        if current_tab["path"]:
+            try:
+                with open(current_tab["path"], "w", encoding="utf-8") as f:
+                    f.write(current_tab["text_field"].value)
+                current_tab["saved"] = True
+                self.show_message("File saved successfully.")
+            except Exception as e:
+                self.show_message(f"Save error: {e}")
+        else:
+            self.save_picker.save_file(
+                file_name="script.lua",
+                file_type=ft.FilePickerFileType.CUSTOM,
+                allowed_extensions=["lua", "txt"]
+            )
+
+
+    def on_save_selected(self, e: ft.FilePickerResultEvent):
+        if e.path:
+            current_tab = list(self.tabs.values())[self.current_tab_index]
+            try:
+                with open(e.path, "w", encoding="utf-8") as f:
+                    f.write(current_tab["text_field"].value)
+                current_tab["saved"] = True
+                current_tab["path"] = e.path
+                self.show_message("File saved successfully.")
+            except Exception as ex:
+                self.show_message(f"Save error: {ex}")
+
+
+    def exec_selected(self, script_name):
         try:
-            with open(path, "w", encoding="utf-8") as f:
-                f.write(content)
-
-            tab["path"] = path
-            tab["saved"] = True
-
-            new_name = f"Script: {os.path.basename(path)}"
-            if new_name != name:
-                self.editor_tabview.delete(name)
-                self.editor_tabs.pop(name)
-                self.create_tab(new_name, content, path)
-
-            messagebox.showinfo("Success", "Saved")
-            self.update_scripts()
-            self.save_tabs()
+            with open(os.path.join(scripts_dir, script_name), "r", encoding="utf-8") as f:
+                Seliware.Execute(f.read())
         except Exception as e:
-            messagebox.showerror("Error", f"Failed: {str(e)}")
-
-    def get_new_name(self, current):
-        dialog = ctk.CTkToplevel(self.root)
-        dialog.title("Rename")
-        dialog.geometry("300x150")
-        dialog.transient(self.root)
-        dialog.grab_set()
-
-        result = tk.StringVar(value=current)
-
-        ctk.CTkLabel(dialog, text="New name:").pack(pady=5)
-        entry = ctk.CTkEntry(dialog, textvariable=result)
-        entry.pack(pady=5, padx=10, fill="x")
-
-        def submit():
-            dialog.destroy()
-
-        ctk.CTkButton(dialog, text="OK", command=submit).pack(pady=5)
-
-        dialog.wait_window()
-        return result.get()
-
+            self.show_message(f"Error: {str(e)}")
+    
+    def open_in_editor(self, script_name):
+        path = os.path.join(scripts_dir, script_name)
+        
+        for tab_name, tab in self.tabs.items():
+            if tab["path"] == path:
+                self.switch_to_tab(tab_name)
+                return
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                self.add_tab(f"Script: {script_name}", f.read(), path)
+        except Exception as e:
+            self.show_message(f"Error opening: {str(e)}")
+    
+    def remove_script(self, script_name):
+        try:
+            os.remove(os.path.join(scripts_dir, script_name))
+            self.update_scripts()
+            self.show_message("Script deleted")
+        except Exception as e:
+            self.show_message(f"Error deleting: {str(e)}")
+    
+    def apply_editor_settings(self, e):
+        try:
+            self.font_var = self.font_entry.value
+            self.font_size_var = int(self.font_size_entry.value)
+            self.top_most_var = self.top_most_switch.value
+            
+            self.page.window_always_on_top = self.top_most_var
+            self.show_message("Settings applied")
+        except ValueError:
+            self.show_message("Invalid font size")
+    
+    def save_editor_settings(self, e):
+        self.apply_editor_settings(e)
+        self.settings.current_settings.update({
+            "font": self.font_var,
+            "font_size": self.font_size_var,
+            "top_most": self.top_most_var,
+        })
+        self.settings.save_settings()
+        self.show_message("Settings saved")
+    
     def save_tabs(self):
-        tabs = []
-        for name, data in self.editor_tabs.items():
-            tabs.append({
+        tabs_data = []
+        for name, tab in self.tabs.items():
+            tabs_data.append({
                 "name": name,
-                "path": data["path"],
-                "content": data["textbox"].get("1.0", "end-1c"),
-                "saved": data["saved"]
+                "content": tab["text_field"].value,
+                "path": tab["path"],
+                "saved": tab["saved"]
             })
 
         try:
             with open(tabs_file, "w", encoding="utf-8") as f:
-                json.dump(tabs, f, indent=2)
+                json.dump(tabs_data, f, indent=2)
         except Exception as e:
-            print("Save error:", e)
+            print(f"Error saving tabs: {e}")
+        finally:
+            self.page.update()
 
+    
     def load_tabs(self):
-        if os.path.exists(tabs_file):
-            try:
-                with open(tabs_file, "r", encoding="utf-8") as f:
-                    tabs = json.load(f)
+        if not os.path.exists(tabs_file):
+            return
+        
+        try:
+            with open(tabs_file, "r", encoding="utf-8") as f:
+                tabs_data = json.load(f)
+                for tab in tabs_data:
+                    self.add_tab(tab["name"], tab["content"], tab["path"])
+        except Exception as e:
+            print(f"Error loading tabs: {e}")
+    
+    def show_message(self, message):
+        self.page.snack_bar = ft.SnackBar(ft.Text(message))
+        self.page.snack_bar.open = True
+        self.page.update()
+    
+    def toggle_nav_drawer(self):
+        if self.page.drawer:
+            self.page.drawer.open = not self.page.drawer.open
+            self.page.drawer.update()
+    
+    def on_nav_change(self, e):
+        tab_name = ["Main", "Scripts", "Options"][e.control.selected_index]
+        self.show_tab_content(tab_name)
+    
+    def on_window_event(self, e):
+        if e.data == "close":
+            self.rpc.close()
+            self.save_tabs()
+            self.page.window_destroy()
 
-                for tab in tabs:
-                    content = tab.get("content", "")
-                    path = tab.get("path")
-                    name = tab.get("name", f"Tab {len(self.editor_tabs) + 1}")
+def main(page: ft.Page):
+    app = PyRO(page)
 
-                    self.create_tab(name, content, path)
-                    self.editor_tabs[name]["saved"] = tab.get("saved", True)
-
-            except Exception as e:
-                print("Load error:", e)
-
-
-if __name__ == "__main__":
-    app = PyRO()
+ft.app(target=main)
