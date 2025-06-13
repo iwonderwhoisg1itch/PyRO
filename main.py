@@ -7,6 +7,9 @@ import time
 import sys
 from pypresence import Presence
 from threading import Thread
+from System.Net import ServicePointManager, SecurityProtocolType
+
+ServicePointManager.SecurityProtocol = SecurityProtocolType.Tls12 | SecurityProtocolType.Tls13
 
 class DiscordRPC:
     def __init__(self):
@@ -89,7 +92,7 @@ def getSeliVer():
         seliver = ver
     return seliver 
 
-ver = "0.5"
+ver = "0.5b"
 seliver = getSeliVer()
 
 rbx_pids = []
