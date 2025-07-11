@@ -242,7 +242,7 @@ class PyRO:
         self.current_main_tab = "Main"
         
         self.ExecutorAPI.load_api()
-        #self.ExecutorAPI.init_api()
+        self.ExecutorAPI.init_api()
 
         self.rpc = DiscordRPC(self.ExecutorAPI)
 
