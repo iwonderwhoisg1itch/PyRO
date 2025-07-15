@@ -87,6 +87,10 @@ class ExecutorAPI:
             new_pids = [pid for pid in current_pids if pid not in previous_pids]
 
             for pid in new_pids:
+                
+                if pid in rbx_pids:
+                    continue
+                
                 if self._wait_for_window(pid, timeout=15):
                     try:
                         if self.selected_api == "Seliware":
@@ -191,7 +195,7 @@ scripts_dir = os.path.join(base_dir, "scripts")
 tabs_file = os.path.join(base_dir, "open_tabs.json")
 settings_file = os.path.join(base_dir, "settings.json")
 
-ver = "v0.6"
+ver = "v0.6b"
 
 rbx_pids = []
 
@@ -568,7 +572,8 @@ class PyRO:
             icon=ft.Icons.CLOSE,
             icon_size=14,
             data=name,
-            on_click=self.close_tab_click
+            on_click=self.close_tab_click,
+            icon_color=Colors["secondary"]
         )
 
         Colors = self.theme_manager.get_theme_colors()
@@ -933,17 +938,21 @@ def splash_screen(page: ft.Page):
         spacing=5
     )
 
-    changelog_title = ft.Text("Changelog:", 
-                            visible=False, 
-                            weight="bold", 
-                            color=ft.Colors.WHITE, 
+    changelog_title = ft.Text("Changelog:",
+                            visible=False,
+                            weight="bold",
+                            color=ft.Colors.WHITE,
                             size=20)
 
-    changelog_text = ft.Text("", 
-                           visible=False, 
-                           overflow=ft.TextOverflow.ELLIPSIS, 
-                           color=ft.Colors.WHITE70, 
-                           size=16)
+    changelog_text = ft.Text(
+        "",
+        visible=False,
+        color=ft.Colors.WHITE70,
+        size=16,
+        max_lines=None,
+        no_wrap=False,
+        expand=True
+    )
 
     right_content = ft.Column(
         [
@@ -952,7 +961,8 @@ def splash_screen(page: ft.Page):
         ],
         alignment="center",
         horizontal_alignment="center",
-        spacing=10
+        spacing=10,
+        expand=True
     )
 
     main_layout = ft.Row(
@@ -965,7 +975,7 @@ def splash_screen(page: ft.Page):
             ft.Container(
                 content=right_content,
                 expand=True,
-                alignment=ft.alignment.center,
+                alignment=ft.alignment.top_left,
                 padding=10
             )
         ],
@@ -1001,7 +1011,7 @@ def splash_screen(page: ft.Page):
                 total_size = int(response.headers.get('content-length', 0))
                 downloaded = 0
                 block_size = 8192
-                
+
                 with open("PyRO.zip", 'wb') as f:
                     while True:
                         buffer = response.read(block_size)
@@ -1010,7 +1020,7 @@ def splash_screen(page: ft.Page):
                         f.write(buffer)
                         downloaded += len(buffer)
                         update_progress(downloaded, total_size)
-                        
+
             return True
         except Exception as e:
             progress_text.value = f"Download error: {str(e)}"
@@ -1040,7 +1050,6 @@ def splash_screen(page: ft.Page):
         except Exception as e:
             progress_text.value = f"Download error: {str(e)}"
             page.update()
-
 
     def create_bat():
         bat_code = r'''@echo off
@@ -1075,8 +1084,6 @@ exit
         with open("upd.bat", "w", encoding="utf-8") as f:
             f.write(bat_code)
 
-
-
     def animate_progress():
         for i in range(30):
             time.sleep(0.03)
@@ -1097,8 +1104,10 @@ exit
             changelog = release_info['body']
             assets = release_info.get('assets', [])
             download_url = assets[0]['browser_download_url'] if assets else release_info['html_url']
-            
+
             if latest_version != ver:
+                ver = latest_version
+                version_text.value = ver
                 progress_text.value = f"Update available: {latest_version}"
                 changelog_title.visible = True
                 changelog_text.visible = True
@@ -1109,7 +1118,7 @@ exit
             else:
                 progress_text.value = "You have the latest version"
                 animate_progress()
-                
+
         except requests.exceptions.ReadTimeout:
             progress_text.value = "Timeout while checking for updates"
             animate_progress()
@@ -1122,12 +1131,14 @@ exit
             changelog_title.visible = True
             changelog_text.visible = True
             animate_progress()
-            
+
         page.update()
         time.sleep(1)
         page.window.close()
 
     Thread(target=check_update, daemon=True).start()
+
+
 ft.app(target=splash_screen)
 if not update:
     ft.app(target=main)
