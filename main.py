@@ -121,7 +121,6 @@ class ExecutorAPI:
 
     def Execute(self, scr):
         if self.selected_api == "Seliware":
-
             self.loaded_api.execute(scr)
 
 class DiscordRPC:
@@ -191,7 +190,7 @@ scripts_dir = os.path.join(base_dir, "scripts")
 tabs_file = os.path.join(base_dir, "open_tabs.json")
 settings_file = os.path.join(base_dir, "settings.json")
 
-ver = "v0.7"
+ver = "v0.7b"
 
 rbx_pids = []
 
@@ -236,22 +235,6 @@ class PyRO:
         self.ExecutorAPI = ExecutorAPI("Seliware")
 
         self.toast_overlay = ft.Stack(expand=True)
-        self.toast_container = ft.Container(
-            content=ft.Row(
-                controls=[
-                    ft.Icon(ft.Icons.CHECK, color=ft.Colors.WHITE),
-                    ft.Text("", color=ft.Colors.WHITE),
-                ],
-                alignment=ft.MainAxisAlignment.CENTER,
-            ),
-            padding=15,
-            border_radius=5,
-            width=250,
-            opacity=0,
-            animate_opacity=300,
-            top=20,
-        )
-        self.toast_overlay.controls.append(self.toast_container)
         self.page.overlay.append(self.toast_overlay)
         
         page.theme = ft.Theme()
@@ -260,7 +243,7 @@ class PyRO:
         self.current_tab_index = 0
         self.current_main_tab = "Main"
         
-        self.show_toast("Loading",None)
+        self.show_toast("Loading", None)
         self.ExecutorAPI.load_api()
         self.ExecutorAPI.init_api()
 
@@ -279,28 +262,50 @@ class PyRO:
         self.page.on_window_event = self.on_window_event
         self.rpc.start()
         self.apply_theme()
-        self.show_toast("Loaded!",ft.Icons.CHECK)
+        self.show_toast("Loaded!", ft.Icons.CHECK)
         self.ExecutorAPI.loaded_api.injected_event.append(self.injected)
 
     def injected(self):
-        self.show_toast("Injected!",ft.Icons.CHECK)
+        self.show_toast("Injected!", ft.Icons.CHECK)
 
-    def show_toast(self, text: str, icon=ft.Icons.CHECK):
+    def show_toast(self, text: str, icon=None):
         colors = self.theme_manager.get_theme_colors()
         
-        self.toast_container.content.controls[0].name = icon
-        self.toast_container.content.controls[1].value = text
-        self.toast_container.bgcolor = colors["primary"]
+        toast_container = ft.Container(
+            content=ft.Row(
+                controls=[
+                    ft.Icon(icon, color=ft.Colors.WHITE) if icon else ft.Container(width=0),
+                    ft.Text(text, color=ft.Colors.WHITE),
+                ],
+                alignment=ft.MainAxisAlignment.CENTER,
+            ),
+            padding=15,
+            border_radius=5,
+            width=250,
+            opacity=0,
+            animate_opacity=300,
+            top=20,
+            bgcolor=colors["primary"]
+        )
+        
+        self.toast_overlay.controls.append(toast_container)
         
         page_width = self.page.width
-        self.toast_container.left = (page_width - 250) / 2
+        toast_container.left = (page_width - 250) / 2
         
-        self.toast_container.opacity = 1
+        toast_container.opacity = 1
         self.page.update()
         
         def hide_toast():
-            self.toast_container.opacity = 0
+            toast_container.opacity = 0
             self.page.update()
+            
+            def remove_toast():
+                if toast_container in self.toast_overlay.controls:
+                    self.toast_overlay.controls.remove(toast_container)
+                    self.page.update()
+            
+            threading.Timer(0.3, remove_toast).start()
         
         threading.Timer(1.5, hide_toast).start()
 
@@ -462,7 +467,7 @@ class PyRO:
             vertical_alignment=ft.CrossAxisAlignment.CENTER,
         )
     
-    def toggle_auto_inject(self,value):
+    def toggle_auto_inject(self, value):
         self.ExecutorAPI.AutoInject(value)
         self.save_settings()
 

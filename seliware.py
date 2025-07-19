@@ -106,8 +106,10 @@ class Seliware:
         if not os.path.exists(Seliware.injector_path) or not os.path.exists(Seliware.dll_path):
             raise SeliwareError("Missing injector or DLL. Reinstall Seliware and disable antivirus.")
 
-        shutil.copyfile(Seliware.dll_path, Seliware.dll_sys32_path)
-
+        try:
+            shutil.copyfile(Seliware.dll_path, Seliware.dll_sys32_path)
+        except Exception as e:
+            raise SeliwareError(f"Failed to init Seliware api -> {e}")
         try:
             WebSocketStuff.initialize_socket()
         except Exception as e:
