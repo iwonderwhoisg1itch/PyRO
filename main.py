@@ -2,7 +2,6 @@ import win32gui
 import win32process
 import os
 import json
-import clr
 import psutil
 import time
 import sys
@@ -10,13 +9,18 @@ import urllib3
 import requests
 import subprocess
 import flet as ft
+import threading
 from math import floor
 from urllib.request import urlopen
 from pypresence import Presence
 from threading import Thread
-from System.Net import ServicePointManager, SecurityProtocolType # type: ignore
+from seliware import Seliware
 
-ServicePointManager.SecurityProtocol = SecurityProtocolType.Tls12 | SecurityProtocolType.Tls13
+if os.path.exists("upd.bat"):
+    try:
+        os.remove("udp.bat")
+    except:
+        pass
 
 class ExecutorAPI:
     def __init__(self, api):
@@ -26,25 +30,22 @@ class ExecutorAPI:
         self.auto_inject_thread = None
 
     def load_api(self):
-        if self.selected_api == "Seliware":
-            clr.AddReference(dll_path)
-            from SeliwareAPI import Seliware  # type: ignore
-            self.loaded_api = Seliware
+        self.loaded_api = Seliware
 
     def init_api(self):
         if self.selected_api == "Seliware":
-            self.loaded_api.Initialize()
+            self.loaded_api.initialize()
 
     def getapiname(self):
         return self.selected_api
 
     def getrawapiver(self):
         if self.selected_api == "Seliware":
-            return self.loaded_api.GetVersion()
+            return self.loaded_api.version
 
     def getapiver(self):
         if self.selected_api == "Seliware":
-            ver = self.loaded_api.GetVersion()
+            ver = self.loaded_api.version
             return ver.split("-", 1)[-1] if "-" in ver else ver
 
     def Inject(self):
@@ -58,13 +59,11 @@ class ExecutorAPI:
             if pid not in rbx_pids:
                 try:
                     if self.selected_api == "Seliware":
-                        self.loaded_api.Inject(pid)
+                        self.loaded_api.inject(pid)
                     rbx_pids.append(pid)
                     print(f"Injected into PID {pid}")
                 except Exception as e:
                     print(f"Injection failed for PID {pid}: {e}")
-
-
 
     def AutoInject(self, enabled: bool):
         if enabled == self.auto_inject_enabled:
@@ -87,14 +86,12 @@ class ExecutorAPI:
             new_pids = [pid for pid in current_pids if pid not in previous_pids]
 
             for pid in new_pids:
-                
                 if pid in rbx_pids:
                     continue
-                
                 if self._wait_for_window(pid, timeout=15):
                     try:
                         if self.selected_api == "Seliware":
-                            self.loaded_api.Inject(pid)
+                            self.loaded_api.inject(pid)
                         rbx_pids.append(pid)
                     except Exception as e:
                         print(f"Injection failed for PID {pid}: {e}")
@@ -122,11 +119,10 @@ class ExecutorAPI:
 
         return False
 
-
     def Execute(self, scr):
         if self.selected_api == "Seliware":
-            self.loaded_api.Execute(scr)
 
+            self.loaded_api.execute(scr)
 
 class DiscordRPC:
     def __init__(self, exec_api):
@@ -195,7 +191,7 @@ scripts_dir = os.path.join(base_dir, "scripts")
 tabs_file = os.path.join(base_dir, "open_tabs.json")
 settings_file = os.path.join(base_dir, "settings.json")
 
-ver = "v0.6b"
+ver = "v0.7"
 
 rbx_pids = []
 
@@ -238,6 +234,25 @@ class PyRO:
         self.theme_manager = ThemeManager()
         self.setup_window()
         self.ExecutorAPI = ExecutorAPI("Seliware")
+
+        self.toast_overlay = ft.Stack(expand=True)
+        self.toast_container = ft.Container(
+            content=ft.Row(
+                controls=[
+                    ft.Icon(ft.Icons.CHECK, color=ft.Colors.WHITE),
+                    ft.Text("", color=ft.Colors.WHITE),
+                ],
+                alignment=ft.MainAxisAlignment.CENTER,
+            ),
+            padding=15,
+            border_radius=5,
+            width=250,
+            opacity=0,
+            animate_opacity=300,
+            top=20,
+        )
+        self.toast_overlay.controls.append(self.toast_container)
+        self.page.overlay.append(self.toast_overlay)
         
         page.theme = ft.Theme()
 
@@ -245,6 +260,7 @@ class PyRO:
         self.current_tab_index = 0
         self.current_main_tab = "Main"
         
+        self.show_toast("Loading",None)
         self.ExecutorAPI.load_api()
         self.ExecutorAPI.init_api()
 
@@ -263,8 +279,31 @@ class PyRO:
         self.page.on_window_event = self.on_window_event
         self.rpc.start()
         self.apply_theme()
+        self.show_toast("Loaded!",ft.Icons.CHECK)
+        self.ExecutorAPI.loaded_api.injected_event.append(self.injected)
+
+    def injected(self):
+        self.show_toast("Injected!",ft.Icons.CHECK)
+
+    def show_toast(self, text: str, icon=ft.Icons.CHECK):
+        colors = self.theme_manager.get_theme_colors()
         
-    
+        self.toast_container.content.controls[0].name = icon
+        self.toast_container.content.controls[1].value = text
+        self.toast_container.bgcolor = colors["primary"]
+        
+        page_width = self.page.width
+        self.toast_container.left = (page_width - 250) / 2
+        
+        self.toast_container.opacity = 1
+        self.page.update()
+        
+        def hide_toast():
+            self.toast_container.opacity = 0
+            self.page.update()
+        
+        threading.Timer(1.5, hide_toast).start()
+
     def setup_window(self):
         self.page.title = f"PyRO {ver}"
         self.page.window_width = 1000
@@ -283,7 +322,6 @@ class PyRO:
             tab["text_field"].cursor_color = Colors["accent"]
             tab["text_field"].selection_color = Colors["secondary"]
         self.show_tab_content("Main")
-    
     
     def setup_main_tab(self):
         self.script_list = ft.ListView(expand=True)
@@ -679,8 +717,9 @@ class PyRO:
                     content = f.read()
                 script_name = os.path.basename(file_path)
                 self.add_tab(f"Script: {script_name}", content, file_path)
+                self.show_toast(f"Opened: {script_name}", ft.Icons.FILE_OPEN)
             except Exception as ex:
-                self.show_message(f"Open error: {ex}")
+                self.show_toast(f"Open error: {ex}", ft.Icons.ERROR)
 
     def toggle_rename(self, text_field, text_display):
         text_field.visible = True
@@ -740,9 +779,13 @@ class PyRO:
         script = current_tab["text_field"].value
         if script.strip():
             try:
-                self.ExecutorAPI.Execute(script)
+                if self.ExecutorAPI.loaded_api.is_injected():
+                    self.ExecutorAPI.Execute(script)
+                    self.show_toast("Script executed", ft.Icons.PLAY_ARROW)
+                else:
+                    self.show_toast("Please attach!", ft.Icons.CLEAR)
             except Exception as e:
-                self.show_message(f"Execution error: {str(e)}")
+                self.show_toast(f"Execution error: {str(e)}", ft.Icons.ERROR)
     
     def clear_script(self, e):
         if not self.tabs:
@@ -782,9 +825,9 @@ class PyRO:
                 with open(current_tab["path"], "w", encoding="utf-8") as f:
                     f.write(current_tab["text_field"].value)
                 current_tab["saved"] = True
-                self.show_message("File saved successfully.")
+                self.show_toast("File saved successfully", ft.Icons.CHECK)
             except Exception as e:
-                self.show_message(f"Save error: {e}")
+                self.show_toast(f"Save error: {e}", ft.Icons.ERROR)
         else:
             self.save_picker.save_file(
                 file_name="script.lua",
@@ -800,16 +843,17 @@ class PyRO:
                     f.write(current_tab["text_field"].value)
                 current_tab["saved"] = True
                 current_tab["path"] = e.path
-                self.show_message("File saved successfully.")
+                self.show_toast("File saved successfully", ft.Icons.CHECK)
             except Exception as ex:
-                self.show_message(f"Save error: {ex}")
+                self.show_toast(f"Save error: {ex}", ft.Icons.ERROR)
 
     def exec_selected(self, script_name):
         try:
             with open(os.path.join(scripts_dir, script_name), "r", encoding="utf-8") as f:
                 self.ExecutorAPI.Execute(f.read())
+            self.show_toast(f"Executed: {script_name}", ft.Icons.PLAY_ARROW)
         except Exception as e:
-            self.show_message(f"Error: {str(e)}")
+            self.show_toast(f"Error: {str(e)}", ft.Icons.ERROR)
     
     def open_in_editor(self, script_name):
         path = os.path.join(scripts_dir, script_name)
@@ -821,15 +865,17 @@ class PyRO:
         try:
             with open(path, "r", encoding="utf-8") as f:
                 self.add_tab(f"Script: {script_name}", f.read(), path)
+            self.show_toast(f"Opened: {script_name}", ft.Icons.FILE_OPEN)
         except Exception as e:
-            self.show_message(f"Error opening: {str(e)}")
+            self.show_toast(f"Error opening: {str(e)}", ft.Icons.ERROR)
     
     def remove_script(self, script_name):
         try:
             os.remove(os.path.join(scripts_dir, script_name))
             self.update_scripts()
+            self.show_toast(f"Deleted: {script_name}", ft.Icons.DELETE)
         except Exception as e:
-            self.show_message(f"Error deleting: {str(e)}")
+            self.show_toast(f"Error deleting: {str(e)}", ft.Icons.ERROR)
     
     def load_settings(self):
         if os.path.exists(settings_file):
@@ -843,7 +889,7 @@ class PyRO:
                         self.auto_inject_switch.value = settings["auto_inject"]
                         self.ExecutorAPI.AutoInject(settings["auto_inject"])
             except Exception as e:
-                print(f"Error loading settings: {e}")
+                self.show_toast(f"Error loading settings: {e}", ft.Icons.ERROR)
     
     def save_settings(self):
         settings = {
@@ -854,7 +900,7 @@ class PyRO:
             with open(settings_file, "w", encoding="utf-8") as f:
                 json.dump(settings, f, indent=2)
         except Exception as e:
-            print(f"Error saving settings: {e}")
+            self.show_toast(f"Error saving settings: {e}", ft.Icons.ERROR)
     
     def save_tabs(self):
         tabs_data = []
@@ -870,7 +916,7 @@ class PyRO:
             with open(tabs_file, "w", encoding="utf-8") as f:
                 json.dump(tabs_data, f, indent=2)
         except Exception as e:
-            print(f"Error saving tabs: {e}")
+            self.show_toast(f"Error saving tabs: {e}", ft.Icons.ERROR)
         finally:
             self.page.update()
     
@@ -884,12 +930,7 @@ class PyRO:
                 for tab in tabs_data:
                     self.add_tab(tab["name"], tab["content"], tab["path"])
         except Exception as e:
-            print(f"Error loading tabs: {e}")
-    
-    def show_message(self, message):
-        self.page.snack_bar = ft.SnackBar(ft.Text(message))
-        self.page.snack_bar.open = True
-        self.page.update()
+            self.show_toast(f"Error loading tabs: {e}", ft.Icons.ERROR)
     
     
     def on_nav_change(self, e):
@@ -1072,8 +1113,6 @@ echo Deleting PyRO.zip...
 del /f /q PyRO.zip
 
 echo Done.
-
-del /f /q upd.bat
 
 echo Done.
 echo you can close this window and open PyRO if it does not happen automatically
