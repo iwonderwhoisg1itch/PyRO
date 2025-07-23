@@ -190,7 +190,7 @@ scripts_dir = os.path.join(base_dir, "scripts")
 tabs_file = os.path.join(base_dir, "open_tabs.json")
 settings_file = os.path.join(base_dir, "settings.json")
 
-ver = "v0.7b"
+ver = "v0.7c"
 
 rbx_pids = []
 

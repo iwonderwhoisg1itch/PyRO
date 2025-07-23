@@ -1,5 +1,6 @@
 from websocket_server import WebsocketServer
 import json
+import socket
 
 class TheBehavior:
     def __init__(self, client, server):
@@ -10,14 +11,24 @@ class TheBehavior:
         self.server.send_message(self.client, json.dumps(data))
 
 
-class WebSocketStuff:
+class WebSocketStuff(Exception):
     initialized = False
     clients = {}
+
+    @staticmethod
+    def _is_port_in_use(port: int, host='localhost') -> bool:
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            return s.connect_ex((host, port)) == 0
 
     @staticmethod
     def initialize_socket():
         if WebSocketStuff.initialized:
             return
+
+        port = 3000
+        host = '127.0.0.1'
+        if WebSocketStuff._is_port_in_use(port, host):
+            raise WebSocketStuff(f"Port {port} is already in use, forgot to close torent clients? or another seliware instance is not closed?")
 
         def on_message(client, server, message):
             try:
