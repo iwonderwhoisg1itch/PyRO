@@ -1,7 +1,7 @@
 import win32gui
 import win32process
 import os
-import json
+import ujson as json
 import psutil
 import time
 import sys
@@ -10,6 +10,7 @@ import requests
 import subprocess
 import flet as ft
 import threading
+import asyncio
 from math import floor
 from urllib.request import urlopen
 from pypresence import Presence
@@ -190,7 +191,7 @@ scripts_dir = os.path.join(base_dir, "scripts")
 tabs_file = os.path.join(base_dir, "open_tabs.json")
 settings_file = os.path.join(base_dir, "settings.json")
 
-ver = "v0.7c"
+ver = "v0.7.1"
 
 rbx_pids = []
 
@@ -254,16 +255,53 @@ class PyRO:
         self.save_picker = ft.FilePicker(on_result=self.on_save_selected)
         self.page.overlay.extend([self.file_picker, self.save_picker])
         self.load_settings()
-        self.load_tabs()
         
-        if not self.tabs:
-            self.add_tab()
+        threading.Thread(target=self.load_tabs_thread, daemon=True).start()
+        
         
         self.page.on_window_event = self.on_window_event
         self.rpc.start()
         self.apply_theme()
         self.show_toast("Loaded!", ft.Icons.CHECK)
         self.ExecutorAPI.loaded_api.injected_event.append(self.injected)
+
+    
+    def load_tabs_thread(self):
+        self.page.run_task(self._load_tabs_async)
+
+    async def _load_tabs_async(self):
+        if not os.path.exists(tabs_file):
+            self.add_tab()
+            self.page.update()
+            return
+
+        try:
+            if os.path.getsize(tabs_file) == 0:
+                self.add_tab()
+                self.page.update()
+                return
+
+            with open(tabs_file, "r", encoding="utf-8") as f:
+                content = f.read().strip()
+                if not content:
+                    self.add_tab()
+                    self.page.update()
+                    return
+
+                tabs_data = json.loads(content)
+                for tab in tabs_data:
+                    self.add_tab(tab["name"], tab["content"], tab["path"])
+
+        except json.JSONDecodeError:
+            self.show_toast("Invalid tabs file format", ft.Icons.ERROR)
+
+        except Exception as e:
+            self.show_toast(f"Error loading tabs: {e}", ft.Icons.ERROR)
+
+        if not self.tabs:
+            self.add_tab()
+
+        self.page.update()
 
     def injected(self):
         self.show_toast("Injected!", ft.Icons.CHECK)
@@ -925,19 +963,6 @@ class PyRO:
         finally:
             self.page.update()
     
-    def load_tabs(self):
-        if not os.path.exists(tabs_file):
-            return
-        
-        try:
-            with open(tabs_file, "r", encoding="utf-8") as f:
-                tabs_data = json.load(f)
-                for tab in tabs_data:
-                    self.add_tab(tab["name"], tab["content"], tab["path"])
-        except Exception as e:
-            self.show_toast(f"Error loading tabs: {e}", ft.Icons.ERROR)
-    
-    
     def on_nav_change(self, e):
         tab_name = ["Main", "Options"][e.control.selected_index]
         self.show_tab_content(tab_name)
@@ -964,10 +989,31 @@ def splash_screen(page: ft.Page):
     page.horizontal_alignment = "center"
     page.vertical_alignment = "center"
 
+    theme_manager = ThemeManager()
+    if os.path.exists(settings_file):
+        try:
+            with open(settings_file, "r", encoding="utf-8") as f:
+                settings = json.load(f)
+                if "theme_name" in settings:
+                    theme_manager.set_theme(settings["theme_name"])
+        except:
+            pass
+
+    colors = theme_manager.get_theme_colors()
+
+    page.theme = ft.Theme(
+        color_scheme_seed=colors["primary"],
+        color_scheme=ft.ColorScheme(
+            primary=colors["primary"],
+            secondary=colors["secondary"],
+            surface=ft.Colors.BLACK
+        )
+    )
+
     app_name = ft.Text("PyRO",
                       size=50,
                       weight="bold",
-                      color=ft.Colors.BLUE_800,
+                      color=colors["primary"],
                       font_family="Roboto")
 
     version_text = ft.Text(f"{ver}",
@@ -1029,7 +1075,7 @@ def splash_screen(page: ft.Page):
         expand=True
     )
 
-    progress = ft.ProgressBar(width=400, color=ft.Colors.BLUE_800)
+    progress = ft.ProgressBar(width=400, color=colors["primary"])
     progress_text = ft.Text("Checking for updates...", size=12, color=ft.Colors.WHITE)
 
     content = ft.Column(
@@ -1122,6 +1168,7 @@ echo Done.
 echo Done.
 echo you can close this window and open PyRO if it does not happen automatically
 start "" PyRO.exe
+pause
 exit
 '''
 
