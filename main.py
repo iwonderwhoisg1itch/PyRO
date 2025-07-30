@@ -11,6 +11,7 @@ import subprocess
 import flet as ft
 import threading
 import asyncio
+import random
 from math import floor
 from urllib.request import urlopen
 from pypresence import Presence
@@ -188,14 +189,37 @@ base_dir = get_base_path()
 bin_dir = os.path.dirname(os.path.abspath(__file__))
 dll_path = os.path.join(bin_dir, "SeliwareAPI.dll")
 scripts_dir = os.path.join(base_dir, "scripts")
-tabs_file = os.path.join(base_dir, "open_tabs.json")
+tabs_dir = os.path.join(base_dir, "tabs")
 settings_file = os.path.join(base_dir, "settings.json")
 
-ver = "v0.7.1"
+ver = "v0.7.2"
+
+splashs  = ["smart man with glasses download",
+            "Умный в гору не пойдет, умный человек скачать обои - Ян Топлесс",
+            "Made by G1itch, Powered by Autism :troll:",
+            "Free Seliware 💯💯💯💯 REAL!!! 🤑🤑🤑🤑",
+            "i love flet <3",
+            "Fun fact! This ui is made by Seliware staff member!",
+            "Fun fact! This ui runs custom custom ui api!",
+            "i farted",
+            "getwave.wtf >>>>> seliware.com",
+            "Сосал?",
+            "What kind of hottie is using this ui?",
+            "Also try TRX ui made by my friend!",
+            "Also try KRNL old ui made by my friend!",
+            "Also try KRNL new ui made by my friend!",
+            "Also try SynX custom ui!",
+            "We each got… fifteen dollars. Oh, and a quarter. Don’t forget the quarter",
+            "ъуъ",
+            "Я ВЫЕБАЛ ХЛЕБ!!!!!!!!!!!!",
+            "a = '123' print('a')",
+            "Скачать армяне",
+            "There was an problem while processing your request: Authentication failed. Subscription ended?"]
 
 rbx_pids = []
 
 os.makedirs(scripts_dir, exist_ok=True)
+os.makedirs(tabs_dir, exist_ok=True)
 
 class ThemeManager:
     def __init__(self):
@@ -258,47 +282,48 @@ class PyRO:
         
         threading.Thread(target=self.load_tabs_thread, daemon=True).start()
         
-        
         self.page.on_window_event = self.on_window_event
         self.rpc.start()
         self.apply_theme()
         self.show_toast("Loaded!", ft.Icons.CHECK)
         self.ExecutorAPI.loaded_api.injected_event.append(self.injected)
 
-    
     def load_tabs_thread(self):
         self.page.run_task(self._load_tabs_async)
 
     async def _load_tabs_async(self):
-        if not os.path.exists(tabs_file):
+        if not os.path.exists(tabs_dir):
             self.add_tab()
             self.page.update()
             return
 
         try:
-            if os.path.getsize(tabs_file) == 0:
+            tab_files = [f for f in os.listdir(tabs_dir) if f.endswith('.lua')]
+            
+            if not tab_files:
                 self.add_tab()
                 self.page.update()
                 return
 
-            with open(tabs_file, "r", encoding="utf-8") as f:
-                content = f.read().strip()
-                if not content:
-                    self.add_tab()
-                    self.page.update()
-                    return
+            loaded_tabs = []
+            for tab_file in tab_files:
+                tab_path = os.path.join(tabs_dir, tab_file)
+                try:
+                    with open(tab_path, "r", encoding="utf-8") as f:
+                        content = f.read()
+                    tab_name = os.path.splitext(tab_file)[0]
+                    loaded_tabs.append((tab_name, content, tab_path))
+                except Exception as e:
+                    print(f"Error loading tab {tab_file}: {e}")
 
-                tabs_data = json.loads(content)
-                for tab in tabs_data:
-                    self.add_tab(tab["name"], tab["content"], tab["path"])
+            for tab_name, content, tab_path in loaded_tabs:
+                self.add_tab(tab_name, content, tab_path)
 
-        except json.JSONDecodeError:
-            self.show_toast("Invalid tabs file format", ft.Icons.ERROR)
+            if not self.tabs:
+                self.add_tab()
 
         except Exception as e:
             self.show_toast(f"Error loading tabs: {e}", ft.Icons.ERROR)
-
-        if not self.tabs:
             self.add_tab()
 
         self.page.update()
@@ -348,7 +373,7 @@ class PyRO:
         threading.Timer(1.5, hide_toast).start()
 
     def setup_window(self):
-        self.page.title = f"PyRO {ver}"
+        self.page.title = f"PyRO {ver} | {random.choice(splashs)}"
         self.page.window_width = 1000
         self.page.window_height = 700
         self.page.theme_mode = ft.ThemeMode.DARK
@@ -657,7 +682,6 @@ class PyRO:
             icon_color=Colors["secondary"]
         )
 
-        Colors = self.theme_manager.get_theme_colors()
         tab_header = ft.Container(
             content=ft.Row([tab_click_area, tab_name_input, close_btn]),
             padding=ft.padding.symmetric(horizontal=10, vertical=5),
@@ -772,7 +796,17 @@ class PyRO:
     def rename_tab(self, old_name, new_name):
         if not new_name or new_name in self.tabs:
             return
+            
         tab = self.tabs.pop(old_name)
+        
+        if tab["path"] and os.path.exists(tab["path"]):
+            try:
+                new_path = os.path.join(tabs_dir, f"{new_name}.lua")
+                os.rename(tab["path"], new_path)
+                tab["path"] = new_path
+            except Exception as e:
+                self.show_toast(f"Error renaming file: {e}", ft.Icons.ERROR)
+        
         tab["text"].value = new_name
         tab["input"].value = new_name
         tab["text"].visible = True
@@ -780,6 +814,7 @@ class PyRO:
         tab["header"].data = new_name
         tab["header"].content.controls[-1].data = new_name
         self.tabs[new_name] = tab
+        
         self.update_tabs_ui()
         self.rpc.set_editor_tab(new_name)
         self.save_tabs()
@@ -787,6 +822,14 @@ class PyRO:
     def _remove_tab(self, tab_name):
         if tab_name not in self.tabs:
             return
+            
+        tab = self.tabs[tab_name]
+        
+        if tab["path"] and os.path.exists(tab["path"]):
+            try:
+                os.remove(tab["path"])
+            except Exception as e:
+                self.show_toast(f"Error deleting tab file: {e}", ft.Icons.ERROR)
         
         tab_index = list(self.tabs.keys()).index(tab_name)
         del self.tabs[tab_name]
@@ -946,22 +989,35 @@ class PyRO:
             self.show_toast(f"Error saving settings: {e}", ft.Icons.ERROR)
     
     def save_tabs(self):
-        tabs_data = []
-        for name, tab in self.tabs.items():
-            tabs_data.append({
-                "name": name,
-                "content": tab["text_field"].value,
-                "path": tab["path"],
-                "saved": tab["saved"]
-            })
-
+        current_paths = set()
+        
         try:
-            with open(tabs_file, "w", encoding="utf-8") as f:
-                json.dump(tabs_data, f, indent=2)
+            for name, tab in self.tabs.items():
+                safe_name = "".join(c for c in name if c.isalnum() or c in (' ', '_', '-')).rstrip()
+                if not safe_name:
+                    safe_name = "untitled"
+                    
+                tab_path = os.path.join(tabs_dir, f"{safe_name}.lua")
+                
+                with open(tab_path, "w", encoding="utf-8") as f:
+                    f.write(tab["text_field"].value)
+                    
+                tab["path"] = tab_path
+                tab["saved"] = True
+                current_paths.add(tab_path)
+
+            for f in os.listdir(tabs_dir):
+                if f.endswith('.lua'):
+                    file_path = os.path.join(tabs_dir, f)
+                    if file_path not in current_paths:
+                        try:
+                            os.remove(file_path)
+                        except Exception as e:
+                            print(f"Error removing old tab file {f}: {e}")
         except Exception as e:
             self.show_toast(f"Error saving tabs: {e}", ft.Icons.ERROR)
-        finally:
-            self.page.update()
+            
+        self.page.update()
     
     def on_nav_change(self, e):
         tab_name = ["Main", "Options"][e.control.selected_index]
@@ -981,7 +1037,7 @@ update = False
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
-def splash_screen(page: ft.Page):
+def updater_screen(page: ft.Page):
     global ver
     page.title = "PyRO Updater"
     page.window_resizable = False
@@ -1230,6 +1286,6 @@ exit
     Thread(target=check_update, daemon=True).start()
 
 
-ft.app(target=splash_screen)
+ft.app(target=updater_screen)
 if not update:
     ft.app(target=main)
