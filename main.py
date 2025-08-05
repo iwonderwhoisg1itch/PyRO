@@ -18,6 +18,8 @@ from pypresence import Presence
 from threading import Thread
 from seliware import Seliware
 
+# this code is soo ass :sob:
+
 if os.path.exists("upd.bat"):
     try:
         os.remove("udp.bat")
@@ -192,9 +194,11 @@ scripts_dir = os.path.join(base_dir, "scripts")
 tabs_dir = os.path.join(base_dir, "tabs")
 settings_file = os.path.join(base_dir, "settings.json")
 
-ver = "v0.7.2"
+ver = "v0.7.2b"
 
 splashs  = ["smart man with glasses download",
+            ":sinsluxi:",
+            "ого",
             "Умный в гору не пойдет, умный человек скачать обои - Ян Топлесс",
             "Made by G1itch, Powered by Autism :troll:",
             "Free Seliware 💯💯💯💯 REAL!!! 🤑🤑🤑🤑",
@@ -298,7 +302,14 @@ class PyRO:
             return
 
         try:
-            tab_files = [f for f in os.listdir(tabs_dir) if f.endswith('.lua')]
+            tab_files = []
+            for f in os.listdir(tabs_dir):
+                if f.endswith('.lua'):
+                    path = os.path.join(tabs_dir, f)
+                    creation_time = os.path.getctime(path)
+                    tab_files.append((f, creation_time))
+            
+            tab_files.sort(key=lambda x: x[1])
             
             if not tab_files:
                 self.add_tab()
@@ -306,7 +317,7 @@ class PyRO:
                 return
 
             loaded_tabs = []
-            for tab_file in tab_files:
+            for tab_file, _ in tab_files:
                 tab_path = os.path.join(tabs_dir, tab_file)
                 try:
                     with open(tab_path, "r", encoding="utf-8") as f:
@@ -1236,6 +1247,7 @@ exit
             time.sleep(0.03)
             progress.value = i / 30
             page.update()
+        page.window.close()
 
     def check_update():
         global ver
@@ -1281,7 +1293,6 @@ exit
 
         page.update()
         time.sleep(1)
-        page.window.close()
 
     Thread(target=check_update, daemon=True).start()
 
